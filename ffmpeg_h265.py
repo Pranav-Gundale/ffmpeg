@@ -192,22 +192,64 @@ def main():
     print_resolution_table(analysis, orig_w, orig_h, video_kbps_int, fps)
 
     recommendation = recommend_resolution(analysis)
-    rec_w, rec_h   = recommendation["scaled"]
     source_bpp_val = bpp(video_kbps_int, orig_w, orig_h, fps)
 
+    # --- Resolution picker ---
+    custom_option = len(analysis) + 1
     print()
-    if source_bpp_val >= BPP_GOOD:
-        print(f"  ► Bitrate is sufficient for {orig_w}x{orig_h}. No downscale needed.")
+    print(f"  ► Recommended: {recommendation['scaled'][0]}x{recommendation['scaled'][1]}  ({recommendation['label']})")
+    print()
+    print("  Choose output resolution:")
+    print(f"  0) Source — {orig_w}x{orig_h} (no downscale)  {source_bpp_val:.4f} BPP")
+    for i, r in enumerate(analysis, 1):
+        sw, sh = r["scaled"]
+        marker = "  ◄ recommended" if r is recommendation else ""
+        print(f"  {i}) {r['label']} — {sw}x{sh}  {r['bpp']:.4f} BPP  {r['quality']}{marker}")
+    print(f"  {custom_option}) Enter custom resolution")
+    print()
+
+    def pick_validator(x):
+        n = int(x)
+        if n < 0 or n > custom_option:
+            raise ValueError
+        return n
+
+    choice = get_input(
+        f"  Enter number (0-{custom_option}): ",
+        validator=pick_validator,
+        error_msg=f"Enter a number between 0 and {custom_option}."
+    )
+
+    if choice == 0:
         use_scale = False
         enc_w, enc_h = orig_w, orig_h
+    elif choice == custom_option:
+        use_scale = True
+        enc_w = get_input(
+            "  Custom width  (e.g. 1280): ",
+            validator=lambda x: int(x) if int(x) > 0 else 1/0,
+            error_msg="Enter a positive integer."
+        )
+        enc_h = get_input(
+            "  Custom height (e.g. 720): ",
+            validator=lambda x: int(x) if int(x) > 0 else 1/0,
+            error_msg="Enter a positive integer."
+        )
+        # ensure both are even (hard requirement of libx265/H.265 codec)
+        if enc_w % 2 != 0:
+            enc_w -= 1
+            print(f"  ⚠  Width rounded down to {enc_w} (must be even for H.265)")
+        if enc_h % 2 != 0:
+            enc_h -= 1
+            print(f"  ⚠  Height rounded down to {enc_h} (must be even for H.265)")
+        custom_bpp = bpp(video_kbps_int, enc_w, enc_h, fps)
+        custom_q = "✓ Good" if custom_bpp >= BPP_GOOD else ("~ Acceptable" if custom_bpp >= BPP_ACCEPTABLE else "✗ Blurry")
+        print(f"  → BPP at {enc_w}x{enc_h}: {custom_bpp:.4f}  {custom_q}")
     else:
-        print(f"  ► Recommended resolution : {rec_w}x{rec_h}  ({recommendation['label']})")
-        print(f"    BPP at this resolution : {recommendation['bpp']:.4f}  ({recommendation['quality']})")
-        print(f"    BPP at source {orig_w}x{orig_h}  : {source_bpp_val:.4f}  — would look blurry")
-        print()
-        downscale = get_input(f"  Downscale to {rec_w}x{rec_h} for better quality? (y/n): ").lower()
-        use_scale = downscale == "y"
-        enc_w, enc_h = (rec_w, rec_h) if use_scale else (orig_w, orig_h)
+        use_scale = True
+        enc_w, enc_h = analysis[choice - 1]["scaled"]
+
+    print(f"  → Encoding at {enc_w}x{enc_h}")
 
     # --- Build & print commands ---
     scale_filter = f"scale={enc_w}:{enc_h}:flags=lanczos"
