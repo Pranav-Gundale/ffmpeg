@@ -1,0 +1,1 @@
+ffmpeg -i "input.mkv" -c:v h264_qsv -global_quality 20 -c:a copy "output.mkv"
